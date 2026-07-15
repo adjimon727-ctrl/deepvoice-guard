@@ -7,3 +7,4 @@ librosa
 numpy
 opencv-python-headless
 Pillow
+gunicorn
