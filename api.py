@@ -1,9 +1,4 @@
 import os
-
-# Ajoute ta clé Hugging Face ici (elle commence par hf_...)
-hf_token = os.getenv("HF_TOKEN")
-if hf_token:
-    os.environ["HF_TOKEN"] = hf_token
 import wave
 import shutil
 import numpy as np
@@ -15,18 +10,29 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 import uvicorn
 
-# 1. Initialisation de l'API
+# Configuration Hugging Face
+hf_token = os.getenv("HF_TOKEN")
+if hf_token:
+    os.environ["HF_TOKEN"] = hf_token
+
+# 1. Initialisation UNIQUE de l'API
 app = FastAPI(title="🛡️ DeepVoice Guard - Suite Cyber Multimodale")
 
-# 2. Chargement des modèles au démarrage
-print("Chargement des modèles d'IA...")
-# Modèle Audio
-audio_model_id = "kubinooo/convnext-tiny-224-audio-deepfake-classification"
-audio_classifier = pipeline("image-classification", model=audio_model_id)
+# 2. Déclaration du modèle unique (partagé pour économiser 50% de RAM sur Render)
+shared_classifier = None
 
-# Modèle Image (Chargement local depuis ton dossier)
-image_model_id = "kubinooo/convnext-tiny-224-audio-deepfake-classification"
-image_classifier = pipeline("image-classification", model=image_model_id)
+# 3. Chargement du modèle au démarrage (Asynchrone)
+@app.on_event("startup")
+async def load_models():
+    global shared_classifier
+    print("🚀 Début du chargement du modèle d'IA en arrière-plan...")
+    
+    # On charge le modèle une seule fois. Il servira pour l'audio, l'image et la vidéo !
+    model_id = "kubinooo/convnext-tiny-224-audio-deepfake-classification"
+    shared_classifier = pipeline("image-classification", model=model_id)
+    
+    print("✅ Modèle d'IA unique chargé avec succès et prêt à l'emploi !")
+
 
 def audio_to_mel_spectrogram(audio_path, duration=2.0):
     """Convertit l'audio en spectrogramme pour l'analyse"""
@@ -64,6 +70,9 @@ def audio_to_mel_spectrogram(audio_path, duration=2.0):
 
 def analyze_video_frames(video_path, max_frames=5):
     """Extrait des images clés de la vidéo et fait la moyenne des scores d'analyse"""
+    if shared_classifier is None:
+         raise ValueError("Le modèle d'IA n'est pas encore chargé.")
+
     cap = cv2.VideoCapture(video_path)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if frame_count == 0:
@@ -82,7 +91,7 @@ def analyze_video_frames(video_path, max_frames=5):
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(frame_rgb)
         
-        predictions = image_classifier(pil_img)
+        predictions = shared_classifier(pil_img)
         
         res = {}
         for pred in predictions:
@@ -105,7 +114,7 @@ def analyze_video_frames(video_path, max_frames=5):
     }
 
 
-# 3. INTERFACE WEB MULTIMODALE
+# 4. INTERFACE WEB MULTIMODALE
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
@@ -284,7 +293,7 @@ async def home():
             if (!file) return;
 
             if (currentMode === 'audio' || currentMode === 'video') {
-                alert("Fonctionnalite Premium\\n\\nL'analyse avancee des flux Audios et Videos est reservee aux abonnes Premium et infrastructures B2B.\\n\\nLa version de demonstration gratuite est limitee a l'analyse d'Images.\\n\\nPour deployer DeepVoice Guard au sein de votre entreprise, contactez-nous.");
+                alert("Fonctionnalité Premium\\n\\nL'analyse avancée des flux Audios et Vidéos est réservée aux abonnés Premium et infrastructures B2B.\\n\\nLa version de démonstration gratuite est limitée à l'analyse d'Images.\\n\\nPour déployer DeepVoice Guard au sein de votre entreprise, contactez-nous.");
                 return;
             }
 
@@ -313,10 +322,10 @@ async def home():
                     const verdictBadge = document.getElementById('mainVerdict');
                     let verdictText = '';
                     if (data.verdict_principal === 'fake') {
-                        verdictText = 'Element Contrefait / Fake';
+                        verdictText = 'Élément Contrefait / Fake';
                         verdictBadge.className = 'uppercase text-xs font-extrabold px-3 py-1 rounded-full bg-red-500/10 text-red-400 border border-red-500/20';
                     } else {
-                        verdictText = 'Element Authentique / Real';
+                        verdictText = 'Élément Authentique / Real';
                         verdictBadge.className = 'uppercase text-xs font-extrabold px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
                     }
                     verdictBadge.textContent = verdictText;
@@ -329,7 +338,7 @@ async def home():
             } catch (err) {
                 alert("Erreur de connexion au serveur.");
             } finally {
-                btnAnalyze.textContent = "Lancer l'analyse biometrique";
+                btnAnalyze.textContent = "Lancer l'analyse biométrique";
                 btnAnalyze.className = "w-full mt-6 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg cursor-pointer transition-all text-center";
             }
         });
@@ -391,22 +400,22 @@ async def home():
                                 <p class="text-xs text-slate-500 uppercase tracking-widest font-semibold mt-1">Rapport d'Expertise Médias Multimodal</p>
                             </div>
                             <div class="text-right text-xs text-slate-500">
-                                <p><strong>Date d'analyse :</strong> ${dateString}</p>
-                                <p><strong>Type de flux :</strong> ${lastScanData.type}</p>
+                                <p><strong>Date d'analyse :</strong> \${dateString}</p>
+                                <p><strong>Type de flux :</strong> \${lastScanData.type}</p>
                             </div>
                         </div>
                         
                         <h2 class="text-xl font-bold text-slate-800 mb-4">Analyse de Contrefaçon Numérique</h2>
                         
                         <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6 font-mono text-xs space-y-1">
-                            <p><strong>Fichier examiné :</strong> ${lastScanData.name}</p>
+                            <p><strong>Fichier examiné :</strong> \${lastScanData.name}</p>
                             <p><strong>Vérification :</strong> Intégrité structurelle des métadonnées et pixels/fréquences</p>
                         </div>
 
                         <div class="border border-slate-200 rounded-xl p-6 text-center mb-8 bg-slate-50/50">
                             <p class="text-sm uppercase tracking-wider font-semibold text-slate-500">Verdict de l'Intelligence Artificielle</p>
-                            <p class="text-2xl font-black mt-2 uppercase tracking-tight ${lastScanData.verdict.includes('Fake') ? 'text-red-600' : 'text-emerald-600'}">
-                                ${lastScanData.verdict}
+                            <p class="text-2xl font-black mt-2 uppercase tracking-tight \${lastScanData.verdict.includes('Fake') ? 'text-red-600' : 'text-emerald-600'}">
+                                \${lastScanData.verdict}
                             </p>
                         </div>
 
@@ -415,26 +424,26 @@ async def home():
                             <div>
                                 <div class="flex justify-between text-xs mb-1 font-semibold">
                                     <span>Probabilité d'Anomalie/Génération Synthétique (FAKE)</span>
-                                    <span class="text-red-600">${lastScanData.fake}%</span>
+                                    <span class="text-red-600">\${lastScanData.fake}%</span>
                                 </div>
                                 <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                                    <div class="bg-red-600 h-3" style="width: ${lastScanData.fake}%"></div>
+                                    <div class="bg-red-600 h-3" style="width: \${lastScanData.fake}%"></div>
                                 </div>
                             </div>
                             <div>
                                 <div class="flex justify-between text-xs mb-1 font-semibold">
                                     <span>Indice d'Élément Réel / Captation Physique (REAL)</span>
-                                    <span class="text-emerald-600">${lastScanData.real}%</span>
+                                    <span class="text-emerald-600">\${lastScanData.real}%</span>
                                 </div>
                                 <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
-                                    <div class="bg-emerald-600 h-3" style="width: ${lastScanData.real}%"></div>
+                                    <div class="bg-emerald-600 h-3" style="width: \${lastScanData.real}%"></div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="border-t border-slate-200 pt-6 flex justify-between items-center text-[10px] text-slate-400 font-mono">
-                            <p>ID Vérification : DVG-MULTIMODAL-${lastScanData.type}-SECURE</p>
-                            <p>© ${new Date().getFullYear()} - Document d'audit confidentiel</p>
+                            <p>ID Vérification : DVG-MULTIMODAL-\${lastScanData.type}-SECURE</p>
+                            <p>© \${new Date().getFullYear()} - Document d'audit confidentiel</p>
                         </div>
                     </div>
                 </body>
@@ -451,9 +460,16 @@ async def home():
     """
 
 
-# 4. ROUTE DE DÉTECTION MULTIMODALE UNIQUE
+# 5. ROUTE DE DÉTECTION MULTIMODALE UNIQUE
 @app.post("/scan")
 async def scan_media(file: UploadFile = File(...), mode: str = Form(...)):
+    # SÉCURITÉ : Bloquer la requête proprement si le modèle charge toujours
+    if shared_classifier is None:
+        raise HTTPException(
+            status_code=503, 
+            detail="Le serveur a démarré avec succès mais le modèle d'IA est encore en cours de chargement en tâche de fond. Veuillez réessayer dans une minute."
+        )
+
     filename_lower = file.filename.lower()
     
     # Validation du format selon le mode
@@ -475,7 +491,7 @@ async def scan_media(file: UploadFile = File(...), mode: str = Form(...)):
         # LOGIQUE 1 : AUDIO
         if mode == "audio":
             img_spectrogram = audio_to_mel_spectrogram(temp_path)
-            predictions = audio_classifier(img_spectrogram)
+            predictions = shared_classifier(img_spectrogram)
             for pred in predictions:
                 lbl = pred['label'].lower()
                 if lbl in ['fake', 'ai', 'artificial', 'synthetic', 'spoof']:
@@ -488,7 +504,7 @@ async def scan_media(file: UploadFile = File(...), mode: str = Form(...)):
         # LOGIQUE 2 : IMAGE
         elif mode == "image":
             pil_img = Image.open(temp_path).convert("RGB")
-            predictions = image_classifier(pil_img)
+            predictions = shared_classifier(pil_img)
             for pred in predictions:
                 lbl = pred['label'].lower()
                 if lbl in ['fake', 'ai', 'artificial', 'synthetic']:
