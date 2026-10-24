@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: deepvoice-guard
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_PATH
+        value: /tmp/deepvoice_guard.db
+      - key: HF_HOME
+        value: /tmp/huggingface
+      - key: APP_ENV
+        value: production
