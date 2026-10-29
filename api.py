@@ -389,8 +389,8 @@ async def home():
         <div id="dropzone" class="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-xl p-8 text-center cursor-pointer transition-colors bg-slate-950/40">
             <input type="file" id="mediaFile" accept="image/*" class="hidden">
             <div class="space-y-2">
-                <p class="text-base font-medium">Glissez-déposez votre fichier <span id="text-mode-file">audio</span> ici</p>
-                <p class="text-xs text-slate-500" id="text-formats">Formats supportés : WAV, MP3, M4A</p>
+                <p class="text-base font-medium">Glissez-déposez votre fichier <span id="text-mode-file">image</span> ici</p>
+                <p class="text-xs text-slate-500" id="text-formats">Formats supportés : JPG, PNG, JPEG, WEBP</p>
                 <button type="button" class="mt-4 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">Parcourir</button>
             </div>
         </div>
@@ -545,13 +545,18 @@ async def home():
 
             btnAnalyze.textContent = "Analyse algorithmique en cours...";
             btnAnalyze.className = "w-full mt-6 bg-slate-700 text-slate-400 font-bold py-3 px-4 rounded-xl cursor-wait text-center";
+            btnAnalyze.setAttribute('disabled', 'true');
             
             const formData = new FormData();
             formData.append("file", file);
             formData.append("mode", currentMode);
 
             try {
-                const response = await fetch('/scan', { method: 'POST', body: formData });
+                const response = await fetch('/scan', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
                 const data = await response.json();
 
                 if (response.ok) {
@@ -580,32 +585,43 @@ async def home():
                     lastScanData = { type: currentMode.toUpperCase(), name: file.name, verdict: verdictText, fake, real };
                     saveToHistory(currentMode.toUpperCase(), file.name, verdictText, fake);
                 } else {
-                    alert("Erreur : " + data.detail);
+                    const msg = typeof data.detail === 'string'
+                        ? data.detail
+                        : (Array.isArray(data.detail) ? data.detail.map(d => d.msg || JSON.stringify(d)).join(' | ') : 'Erreur inconnue');
+                    alert("Erreur : " + msg);
                     if (response.status === 401) refreshAccount();
                 }
             } catch (err) {
-                alert("Erreur de connexion au serveur.");
+                console.error(err);
+                alert("Erreur de connexion au serveur (timeout ou serveur endormi). Réessaie dans 30 secondes.");
             } finally {
-                btnAnalyze.textContent = "Lancer l'analyse biometrique";
+                btnAnalyze.removeAttribute('disabled');
+                btnAnalyze.textContent = "Lancer l'analyse biométrique";
                 btnAnalyze.className = "w-full mt-6 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg cursor-pointer transition-all text-center";
             }
         });
 
         async function submitCredentials(action) {
-            const email = document.getElementById('accountEmail').value;
+            const email = document.getElementById('accountEmail').value.trim();
             const password = document.getElementById('accountPassword').value;
-            const response = await fetch(`/api/${action}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
-            });
-            const data = await response.json();
-            document.getElementById('accountMessage').textContent = response.ok
-                ? 'Connexion réussie.'
-                : data.detail || 'Une erreur est survenue.';
-            if (response.ok) {
-                document.getElementById('accountPassword').value = '';
-                await refreshAccount();
+            document.getElementById('accountMessage').textContent = 'Patiente...';
+            try {
+                const response = await fetch(`/api/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email, password })
+                });
+                const data = await response.json();
+                document.getElementById('accountMessage').textContent = response.ok
+                    ? (action === 'login' ? 'Connexion réussie.' : 'Compte créé. Tu es connecté.')
+                    : (data.detail || 'Une erreur est survenue.');
+                if (response.ok) {
+                    document.getElementById('accountPassword').value = '';
+                    await refreshAccount();
+                }
+            } catch (e) {
+                document.getElementById('accountMessage').textContent = 'Erreur réseau.';
             }
         }
 
@@ -613,36 +629,43 @@ async def home():
             const summary = document.getElementById('accountSummary');
             const form = document.getElementById('accountForm');
             const plans = document.getElementById('planOptions');
-            const response = await fetch('/api/account');
-            if (!response.ok) {
+            try {
+                const response = await fetch('/api/account', { credentials: 'include' });
+                if (!response.ok) {
+                    summary.classList.add('hidden');
+                    form.classList.remove('hidden');
+                    plans.classList.add('hidden');
+                    return;
+                }
+                const data = await response.json();
+                summary.innerHTML = '';
+                const line = document.createElement('p');
+                line.textContent = `${data.account.email} — offre ${data.account.plan} — ${data.usage.remaining}/${data.usage.monthly_limit} analyses restantes ce mois-ci`;
+                summary.appendChild(line);
+                const logout = document.createElement('button');
+                logout.type = 'button';
+                logout.className = 'mt-2 text-xs text-indigo-300 underline';
+                logout.textContent = 'Se déconnecter';
+                logout.addEventListener('click', async () => {
+                    await fetch('/api/logout', { method: 'POST', credentials: 'include' });
+                    await refreshAccount();
+                });
+                summary.appendChild(logout);
+                summary.classList.remove('hidden');
+                form.classList.add('hidden');
+                plans.classList.remove('hidden');
+            } catch (e) {
                 summary.classList.add('hidden');
                 form.classList.remove('hidden');
                 plans.classList.add('hidden');
-                return;
             }
-            const data = await response.json();
-            summary.innerHTML = '';
-            const line = document.createElement('p');
-            line.textContent = `${data.account.email} — offre ${data.account.plan} — ${data.usage.remaining}/${data.usage.monthly_limit} analyses restantes ce mois-ci`;
-            summary.appendChild(line);
-            const logout = document.createElement('button');
-            logout.type = 'button';
-            logout.className = 'mt-2 text-xs text-indigo-300 underline';
-            logout.textContent = 'Se déconnecter';
-            logout.addEventListener('click', async () => {
-                await fetch('/api/logout', { method: 'POST' });
-                await refreshAccount();
-            });
-            summary.appendChild(logout);
-            summary.classList.remove('hidden');
-            form.classList.add('hidden');
-            plans.classList.remove('hidden');
         }
 
         async function startCheckout(plan) {
             const response = await fetch('/api/billing/checkout', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ plan })
             });
             const data = await response.json();
@@ -786,8 +809,8 @@ async def scan_media(
     # Validation du format selon le mode
     if mode == "audio" and not filename_lower.endswith(('.wav', '.mp3', '.m4a', '.ogg')):
         raise HTTPException(status_code=400, detail="Veuillez envoyer un fichier audio valide (.wav, .mp3, .m4a).")
-    elif mode == "image" and not filename_lower.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-        raise HTTPException(status_code=400, detail="Veuillez envoyer une image valide (.jpg, .png, .webp).")
+    elif mode == "image" and not filename_lower.endswith(('.jpg', '.jpeg', '.png', '.webp', '.jfif', '.bmp')):
+        raise HTTPException(status_code=400, detail="Veuillez envoyer une image valide (.jpg, .jpeg, .png, .webp).")
     elif mode == "video" and not filename_lower.endswith(('.mp4', '.avi', '.mov', '.mkv')):
         raise HTTPException(status_code=400, detail="Veuillez envoyer une vidéo valide (.mp4, .avi, .mov).")
 
